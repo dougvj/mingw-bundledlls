@@ -72,7 +72,7 @@ def find_full_path(filename, path_prefixes):
         )
 
 
-def gather_deps(path, path_prefixes, seen):
+def gather_deps(path, path_prefixes, seen, ignore_missing=False):
     ret = [path]
     output = subprocess.check_output(["objdump", "-p", path]).decode(
         "utf-8", "replace").split("\n")
@@ -88,11 +88,16 @@ def gather_deps(path, path_prefixes, seen):
 
         if ldep in seen:
             continue
-
-        dep_path = find_full_path(dep, path_prefixes)
-        seen.add(ldep)
-        subdeps = gather_deps(dep_path, path_prefixes, seen)
-        ret.extend(subdeps)
+        try:
+            dep_path = find_full_path(dep, path_prefixes)
+            seen.add(ldep)
+            subdeps = gather_deps(dep_path, path_prefixes, seen, ignore_missing)
+            ret.extend(subdeps)
+        except RuntimeError as e:
+            if ignore_missing:
+                print("Warning: Ignoring missing dependency '%s'" % dep)
+            else:
+                raise e
 
     return ret
 
@@ -113,12 +118,17 @@ def main():
         action="store_true",
         help="Only valid if --copy is provided. Run UPX on all the DLLs and EXE."
     )
+    parser.add_argument(
+        "--ignore-missing",
+        action="store_true",
+        help="Ignore DLLs that are not found in path"
+    )
     args = parser.parse_args()
 
     if args.upx and not args.copy:
         raise RuntimeError("Can't run UPX if --copy hasn't been provided.")
 
-    all_deps = set(gather_deps(args.exe_file, path_prefixes, set()))
+    all_deps = set(gather_deps(args.exe_file, path_prefixes, set(), args.ignore_missing))
     all_deps.remove(args.exe_file)
 
     print("\n".join(all_deps))
